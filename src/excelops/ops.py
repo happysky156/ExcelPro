@@ -24,6 +24,8 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 
 from .utils import ensure_dir, safe_filename
 
+from copy import copy
+
 
 ProgressCB = Callable[[int, str], None]
 
@@ -242,6 +244,7 @@ def _unique_sheet_name(wb: Workbook, base: str) -> str:
     return name
 
 
+
 def _copy_sheet_with_styles(ws_in, ws_out) -> None:
     # 复制列宽/行高
     for col, dim in ws_in.column_dimensions.items():
@@ -253,18 +256,25 @@ def _copy_sheet_with_styles(ws_in, ws_out) -> None:
     for row in ws_in.iter_rows():
         for cell in row:
             new_cell = ws_out.cell(row=cell.row, column=cell.col_idx, value=cell.value)
+
+            # ⚠️ 关键修复：不要直接引用 cell._style / cell.alignment / cell.font ...
+            # Streamlit Cloud / Py3.13 下可能是 StyleProxy，会触发 unhashable
             if cell.has_style:
-                new_cell._style = cell._style
-            new_cell.number_format = cell.number_format
-            new_cell.alignment = cell.alignment
-            new_cell.font = cell.font
-            new_cell.border = cell.border
-            new_cell.fill = cell.fill
-            new_cell.protection = cell.protection
+                # 方案A（推荐且稳）：逐项 copy，兼容性最好
+                new_cell.font = copy(cell.font)
+                new_cell.border = copy(cell.border)
+                new_cell.fill = copy(cell.fill)
+                new_cell.number_format = cell.number_format
+                new_cell.protection = copy(cell.protection)
+                new_cell.alignment = copy(cell.alignment)
+            else:
+                # 没样式也保留 number_format（有些单元格 value+format 组合）
+                new_cell.number_format = cell.number_format
 
     # 合并单元格
     for merged in ws_in.merged_cells.ranges:
         ws_out.merge_cells(str(merged))
+
 
 
 def op_split_sheets(input_paths: List[Path], out_dir: Path, params: Dict[str, Any], tick: ProgressCB) -> Path:
